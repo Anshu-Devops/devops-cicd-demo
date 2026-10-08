@@ -49,7 +49,11 @@ pipeline {
 
                     sleep 5
 
-                    docker ps
+                    docker ps -a
+                    echo "===== Container Logs ====="
+                    docker logs devops-cicd-demo-test
+
+                    echo "===== Health Check ====="
 
                     curl --fail http://127.0.0.1:18000/health
 
