@@ -3,11 +3,19 @@ pipeline {
 
     environment {
         AWS_REGION = 'ap-south-1'
+
         ECR_REGISTRY = '239711841813.dkr.ecr.ap-south-1.amazonaws.com'
         ECR_REPOSITORY = 'devops-cicd-demo'
+
         IMAGE_TAG = "${BUILD_NUMBER}"
         IMAGE_NAME = "${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+
         TEST_CONTAINER = 'devops-cicd-demo-test'
+
+        APP_SERVER = '172.31.4.226'
+        DEPLOY_CONTAINER = 'devops-cicd-demo'
+
+        SSH_KEY = '/var/lib/jenkins/.ssh/devops-cicd-key.pem'
     }
 
     stages {
@@ -49,12 +57,6 @@ pipeline {
 
                     sleep 5
 
-                    docker ps -a
-                    echo "===== Container Logs ====="
-                    docker logs devops-cicd-demo-test
-
-                    echo "===== Health Check ====="
-
                     curl --fail http://127.0.0.1:18000/health
 
                     docker logs ${TEST_CONTAINER}
@@ -81,6 +83,66 @@ pipeline {
                 '''
             }
         }
+
+        stage('Deploy to Application EC2') {
+            steps {
+                sh '''
+                    ssh \
+                    -i ${SSH_KEY} \
+                    -o StrictHostKeyChecking=no \
+                    ubuntu@${APP_SERVER} \
+                    "AWS_REGION=${AWS_REGION} \
+                     ECR_REGISTRY=${ECR_REGISTRY} \
+                     ECR_REPOSITORY=${ECR_REPOSITORY} \
+                     IMAGE_TAG=${IMAGE_TAG} \
+                     DEPLOY_CONTAINER=${DEPLOY_CONTAINER} \
+                     bash -s" << 'REMOTE_SCRIPT'
+
+                    set -e
+
+                    echo "Logging into ECR..."
+
+                    /usr/local/bin/aws ecr get-login-password \
+                        --region "$AWS_REGION" | \
+                    docker login \
+                        --username AWS \
+                        --password-stdin "$ECR_REGISTRY"
+
+                    echo "Pulling image..."
+
+                    docker pull \
+                        "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+                    echo "Stopping old container..."
+
+                    docker stop "$DEPLOY_CONTAINER" 2>/dev/null || true
+
+                    echo "Removing old container..."
+
+                    docker rm "$DEPLOY_CONTAINER" 2>/dev/null || true
+
+                    echo "Starting new container..."
+
+                    docker run -d \
+                        --name "$DEPLOY_CONTAINER" \
+                        -p 8000:8000 \
+                        "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+                    echo "Waiting for application..."
+
+                    sleep 5
+
+                    echo "Health check..."
+
+                    curl --fail \
+                        http://127.0.0.1:8000/health
+
+                    echo "Deployment successful!"
+
+                    REMOTE_SCRIPT
+                '''
+            }
+        }
     }
 
     post {
@@ -91,12 +153,12 @@ pipeline {
         }
 
         success {
-            echo 'CI pipeline completed successfully!'
-            echo "Docker image pushed: ${IMAGE_NAME}"
+            echo 'CI/CD pipeline completed successfully!'
+            echo "Deployed image: ${IMAGE_NAME}"
         }
 
         failure {
-            echo 'CI pipeline failed. Check the stage logs.'
+            echo 'CI/CD pipeline failed.'
         }
     }
 }
