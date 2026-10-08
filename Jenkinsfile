@@ -139,7 +139,7 @@ pipeline {
 
                     echo "Deployment successful!"
 
-                    REMOTE_SCRIPT
+REMOTE_SCRIPT
                 '''
             }
         }
